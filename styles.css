@@ -6,6 +6,7 @@
     --border-color: #E5E5EA;
     --input-bg: #F9F9F9;
     --accent-blue: #007AFF;
+    --input-border: #E5E5EA;
 }
 
 html.dark {
@@ -15,6 +16,7 @@ html.dark {
     --border-color: #38383A;
     --input-bg: #2C2C2E;
     --accent-blue: #0A84FF;
+    --input-border: #38383A;
 }
 
 /* Animations */
@@ -34,30 +36,54 @@ html.dark {
 }
 
 .input-label {
-    display: block; font-size: 0.75rem; font-weight: 500; margin-bottom: 0.25rem; opacity: 0.7;
+    display: block; 
+    font-size: 0.75rem; 
+    font-weight: 500; 
+    margin-bottom: 0.25rem; 
+    opacity: 0.7;
+    color: var(--text-color);
 }
 
-.input-field {
-    width: 100%; padding: 0.75rem 1rem; border-radius: 0.75rem;
-    background-color: var(--input-bg) !important;
-    color: var(--text-color) !important;
-    border: 1px solid var(--border-color) !important;
-    font-size: 1rem !important;
+/* High Specificity to avoid !important */
+body .input-field {
+    width: 100%; 
+    padding: 0.75rem 1rem; 
+    border-radius: 0.75rem;
+    background-color: var(--input-bg);
+    color: var(--text-color);
+    border: 1px solid var(--input-border);
+    font-size: 1rem;
     outline: none;
+    appearance: none; /* Removes native browser styling */
 }
-.input-field:focus { border-color: var(--accent-blue) !important; }
+
+body .input-field:focus { 
+    border-color: var(--accent-blue); 
+    box-shadow: 0 0 0 1px var(--accent-blue);
+}
 
 .main-btn {
-    width: 100%; background-color: var(--accent-blue); color: white;
-    font-weight: 700; padding: 1rem; border-radius: 0.75rem;
+    width: 100%; 
+    background-color: var(--accent-blue); 
+    color: white;
+    font-weight: 700; 
+    padding: 1rem; 
+    border-radius: 0.75rem;
     box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-    transition: transform 0.1s; margin-bottom: 2rem;
+    transition: transform 0.1s, opacity 0.2s; 
+    margin-bottom: 2rem;
 }
-.main-btn:active { transform: scale(0.98); }
+.main-btn:active { transform: scale(0.98); opacity: 0.9; }
 
 /* Settings Toggles */
 .setting-row {
-    display: flex; justify-content: space-between; align-items: center; font-size: 0.75rem; font-weight: 500; opacity: 0.8;
+    display: flex; 
+    justify-content: space-between; 
+    align-items: center; 
+    font-size: 0.75rem; 
+    font-weight: 500; 
+    opacity: 0.8;
+    color: var(--text-color);
 }
 .toggle { width: 1rem; height: 1rem; accent-color: var(--accent-blue); }
 
@@ -66,6 +92,7 @@ html.dark {
     position: fixed; bottom: 0; left: 0; width: 100%;
     background: rgba(255, 255, 255, 0.95);
     backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
     border-top: 1px solid var(--border-color);
     display: flex; justify-content: space-around;
     padding-bottom: env(safe-area-inset-bottom);
@@ -96,13 +123,14 @@ html.dark .graph-popup { background-color: rgba(242, 242, 247, 0.9); color: blac
     display: grid; grid-template-columns: 0.8fr 0.5fr 1.2fr 1.2fr 1fr;
     padding: 12px 10px; border-bottom: 1px solid var(--border-color);
     font-size: 13px; align-items: center; cursor: pointer;
+    color: var(--text-color);
 }
 .opt-header { 
     font-weight: bold; text-transform: uppercase; font-size: 10px; opacity: 0.6; 
     background: var(--input-bg); pointer-events: none; 
 }
 .opt-detail { 
-    background: var(--input-bg); padding: 12px; border-bottom: 1px solid var(--border-color); display: none; 
+    background: var(--input-bg); padding: 12px; border-bottom: 1px solid var(--border-color); display: none; color: var(--text-color);
 }
 .opt-detail.open { display: block; animation: slideDown 0.2s ease-out; }
 
