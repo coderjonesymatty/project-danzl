@@ -1,0 +1,112 @@
+/* CSS Variables */
+:root {
+    --bg-color: #F2F2F7;
+    --card-bg: #FFFFFF;
+    --text-color: #000000;
+    --border-color: #E5E5EA;
+    --input-bg: #F9F9F9;
+    --accent-blue: #007AFF;
+}
+
+html.dark {
+    --bg-color: #000000;
+    --card-bg: #1C1C1E;
+    --text-color: #FFFFFF;
+    --border-color: #38383A;
+    --input-bg: #2C2C2E;
+    --accent-blue: #0A84FF;
+}
+
+/* Animations */
+@keyframes slideDown { 
+    from { opacity: 0; transform: translateY(-10px); } 
+    to { opacity: 1; transform: translateY(0); } 
+}
+
+/* UI Components */
+.ios-card {
+    background: var(--card-bg);
+    border-radius: 12px;
+    overflow: hidden;
+    margin-bottom: 16px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    transition: background-color 0.3s;
+}
+
+.input-label {
+    display: block; font-size: 0.75rem; font-weight: 500; margin-bottom: 0.25rem; opacity: 0.7;
+}
+
+.input-field {
+    width: 100%; padding: 0.75rem 1rem; border-radius: 0.75rem;
+    background-color: var(--input-bg) !important;
+    color: var(--text-color) !important;
+    border: 1px solid var(--border-color) !important;
+    font-size: 1rem !important;
+    outline: none;
+}
+.input-field:focus { border-color: var(--accent-blue) !important; }
+
+.main-btn {
+    width: 100%; background-color: var(--accent-blue); color: white;
+    font-weight: 700; padding: 1rem; border-radius: 0.75rem;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    transition: transform 0.1s; margin-bottom: 2rem;
+}
+.main-btn:active { transform: scale(0.98); }
+
+/* Settings Toggles */
+.setting-row {
+    display: flex; justify-content: space-between; align-items: center; font-size: 0.75rem; font-weight: 500; opacity: 0.8;
+}
+.toggle { width: 1rem; height: 1rem; accent-color: var(--accent-blue); }
+
+/* Bottom Nav */
+.bottom-nav {
+    position: fixed; bottom: 0; left: 0; width: 100%;
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(10px);
+    border-top: 1px solid var(--border-color);
+    display: flex; justify-content: space-around;
+    padding-bottom: env(safe-area-inset-bottom);
+    padding-top: 8px; z-index: 50;
+    transition: background-color 0.3s;
+}
+html.dark .bottom-nav { background: rgba(28, 28, 30, 0.95); }
+
+.nav-item {
+    flex: 1; text-align: center; color: #999; 
+    font-size: 10px; font-weight: 500; padding-bottom: 2px; cursor: pointer;
+}
+.nav-item.active { color: var(--accent-blue); }
+.nav-icon { width: 24px; height: 24px; margin: 0 auto 2px auto; display: block; }
+
+/* Graph Elements */
+.chart-container { position: relative; height: 280px; width: 100%; }
+.graph-popup {
+    position: absolute; transform: translate(-50%, -120%);
+    background-color: rgba(28, 28, 30, 0.9); color: white;
+    padding: 4px 8px; border-radius: 6px; font-size: 11px; font-weight: 600;
+    pointer-events: none; opacity: 0; transition: opacity 0.1s; z-index: 10;
+}
+html.dark .graph-popup { background-color: rgba(242, 242, 247, 0.9); color: black; }
+
+/* Table Styling */
+.opt-row {
+    display: grid; grid-template-columns: 0.8fr 0.5fr 1.2fr 1.2fr 1fr;
+    padding: 12px 10px; border-bottom: 1px solid var(--border-color);
+    font-size: 13px; align-items: center; cursor: pointer;
+}
+.opt-header { 
+    font-weight: bold; text-transform: uppercase; font-size: 10px; opacity: 0.6; 
+    background: var(--input-bg); pointer-events: none; 
+}
+.opt-detail { 
+    background: var(--input-bg); padding: 12px; border-bottom: 1px solid var(--border-color); display: none; 
+}
+.opt-detail.open { display: block; animation: slideDown 0.2s ease-out; }
+
+/* Zone Colors */
+.bg-sweet { background-color: rgba(52, 199, 89, 0.15); }
+.bg-dead { background-color: rgba(255, 59, 48, 0.1); }
+.bg-free { background-color: rgba(0, 122, 255, 0.1); }
