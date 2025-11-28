@@ -8,17 +8,13 @@
     <meta name="theme-color" content="#ffffff">
     <title>NZ Student Hardship</title>
     
-    <!-- PWA Manifest -->
     <link rel="manifest" href="manifest.json">
-    <!-- Custom Styles -->
     <link rel="stylesheet" href="styles.css">
     
-    <!-- External Libraries -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
+    <script src="assets/lib/tailwind.js"></script>
+    <script src="assets/lib/chart.js"></script>
+    <script src="assets/lib/annotation.js"></script>
 
-    <!-- Tailwind Config -->
     <script>
         tailwind.config = {
             darkMode: 'class',
@@ -32,29 +28,23 @@
         }
     </script>
 </head>
-<body class="pb-24">
+<body class="pb-24 bg-ios-bg text-ios-text transition-colors duration-300">
 
-    <!-- HEADER -->
     <header class="fixed top-0 w-full z-30 pt-12 pb-4 px-4 bg-white/90 dark:bg-[#1C1C1E]/90 backdrop-blur-md border-b border-gray-200 dark:border-gray-800 transition-colors">
         <h1 id="page-title" class="text-xl font-bold text-center tracking-tight">Calculator</h1>
-        
-        <!-- Tracker Nav (Injected via JS) -->
-        <div id="tracker-nav" class="hidden mt-3"></div>
+        <div id="tracker-nav" class="hidden mt-3 text-center"></div>
     </header>
 
     <main class="max-w-md mx-auto px-4 mt-28">
 
-        <!-- TAB 1: CALCULATOR -->
         <div id="tab-calc" class="active-tab">
             <div class="ios-card p-4">
-                <!-- Mode Toggle -->
-                <div class="segmented-control mb-4">
-                    <div class="segment-btn active" onclick="app.calc.setMode('weekly', this)">Weekly</div>
-                    <div class="segment-btn" onclick="app.calc.setMode('fortnightly', this)">Fortnight</div>
-                    <div class="segment-btn" onclick="app.calc.setMode('custom', this)">Custom</div>
+                <div class="segmented-control mb-4 flex rounded-lg bg-gray-200 dark:bg-gray-800 p-1">
+                    <button id="mode-weekly" class="segment-btn active flex-1 py-1 px-3 rounded-md text-xs font-bold transition-all bg-white dark:bg-gray-700 shadow-sm">Weekly</button>
+                    <button id="mode-fortnightly" class="segment-btn flex-1 py-1 px-3 rounded-md text-xs font-bold transition-all opacity-60">Fortnight</button>
+                    <button id="mode-custom" class="segment-btn flex-1 py-1 px-3 rounded-md text-xs font-bold transition-all opacity-60">Custom</button>
                 </div>
 
-                <!-- Inputs -->
                 <div class="grid grid-cols-2 gap-4 mb-2">
                     <div>
                         <label class="input-label">Hourly Rate</label>
@@ -66,13 +56,11 @@
                     </div>
                 </div>
 
-                <!-- Custom Weeks -->
                 <div id="custom-weeks-container" class="hidden mt-2 mb-2">
                     <label class="input-label">Number of Weeks</label>
                     <input id="custom-weeks-count" type="number" pattern="\d*" inputmode="numeric" value="4" class="input-field">
                 </div>
 
-                <!-- Settings Dropdown -->
                 <details class="group mt-2 pt-2 border-t border-gray-100 dark:border-gray-800">
                     <summary class="flex items-center gap-2 cursor-pointer py-2">
                         <span class="text-xs font-medium opacity-60">⚙️ Settings (Theme, KS, Loan)</span>
@@ -81,7 +69,7 @@
                     <div class="space-y-3 pt-3 pb-1">
                         <div class="setting-row">
                             <span>App Theme</span>
-                            <select id="themeSelect" class="text-xs bg-transparent"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select>
+                            <select id="themeSelect" class="text-xs bg-transparent border border-gray-300 dark:border-gray-700 rounded p-1"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select>
                         </div>
                         <div class="setting-row"><span>Holiday Pay (+8%)</span><input type="checkbox" id="hpToggle" class="toggle"></div>
                         <div class="setting-row"><span>Student Loan</span><input type="checkbox" id="slToggle" class="toggle" checked></div>
@@ -108,7 +96,6 @@
             </div>
         </div>
 
-        <!-- TAB 2: TRACKER -->
         <div id="tab-tracker" class="hidden">
             <div class="ios-card p-6 text-center mb-4 border border-gray-200 dark:border-gray-800 relative">
                 <div class="text-xs font-bold uppercase opacity-50 mb-1">Current Balance</div>
@@ -117,14 +104,12 @@
 
             <div id="tracker-list" class="space-y-3 pb-20"></div>
             
-            <button onclick="app.tracker.openModal()" class="fab">
+            <button id="add-txn-fab" class="fixed bottom-24 right-4 bg-blue-500 text-white p-4 rounded-full shadow-lg z-40">
                 <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
             </button>
         </div>
 
-        <!-- TAB 3: GRAPH -->
         <div id="tab-graph" class="hidden">
-            <!-- Visual Settings -->
             <div class="ios-card p-3 mb-4">
                 <div class="setting-row mb-2"><span>Show Wages Ghost Line</span><input type="checkbox" id="ghostToggle" class="toggle"></div>
                 <div class="setting-row"><span>Graph Pop-up Info</span><input type="checkbox" id="popupToggle" class="toggle" checked></div>
@@ -137,7 +122,7 @@
                     <div id="graphPopup" class="graph-popup">Info</div>
                 </div>
                 <div class="px-2 pt-4 pb-2">
-                    <input type="range" id="hourSlider" min="0" max="50" value="0" step="1">
+                    <input type="range" id="hourSlider" min="0" max="50" value="0" step="1" class="w-full">
                 </div>
             </div>
             
@@ -167,7 +152,6 @@
 
     </main>
 
-    <!-- BOTTOM NAV -->
     <nav class="bottom-nav">
         <div class="nav-item active" data-tab="calc">
             <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z"></path></svg>
@@ -183,12 +167,11 @@
         </div>
     </nav>
 
-    <!-- MODAL: ADD TRANSACTION -->
-    <div id="addModal" class="modal-overlay">
-        <div class="modal-content">
+    <div id="addModal" class="hidden fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
+        <div class="bg-white dark:bg-[#1C1C1E] w-full max-w-sm rounded-2xl p-4 shadow-2xl slide-up-anim">
             <div class="flex justify-between items-center mb-4">
                 <h3 class="font-bold text-lg" id="modal-title">Add Transaction</h3>
-                <button onclick="app.tracker.closeModal()" class="text-blue-500 font-bold">Close</button>
+                <button id="modal-close-btn" class="text-blue-500 font-bold">Close</button>
             </div>
             <div class="space-y-4">
                 <input type="hidden" id="t-id">
@@ -211,10 +194,9 @@
                     <input id="t-label" type="text" class="input-field" placeholder="e.g. Rent, Wages">
                 </div>
                 
-                <!-- Action Buttons -->
                 <div class="grid grid-cols-2 gap-2">
-                    <button id="delete-btn" onclick="app.tracker.deleteTxn()" class="hidden w-full bg-red-100 text-red-500 font-bold py-4 rounded-xl mt-2">Delete</button>
-                    <button onclick="app.tracker.saveTxn()" class="w-full bg-blue-600 text-white font-bold py-4 rounded-xl mt-2 col-span-2" id="save-btn">Save</button>
+                    <button id="delete-btn" class="hidden w-full bg-red-100 text-red-500 font-bold py-3 rounded-xl mt-2">Delete</button>
+                    <button id="save-btn" class="w-full bg-blue-600 text-white font-bold py-3 rounded-xl mt-2 col-span-2">Save</button>
                 </div>
             </div>
         </div>
