@@ -1,3 +1,27 @@
+// --- CONSTANTS (Configuration) ---
+// Update these values when NZ Government legislation changes
+const NZ_CONFIG = {
+    TAX_BRACKETS: [
+        { limit: 15600, rate: 0.105 },
+        { limit: 53500, rate: 0.175 },
+        { limit: 78100, rate: 0.30 },
+        { limit: 180000, rate: 0.33 },
+        { limit: Infinity, rate: 0.39 }
+    ],
+    ACC: {
+        RATE: 0.016, // 1.6% (Approximate for 2024/25)
+        CAP: 142283 // Max earnings liable for ACC
+    },
+    STUDENT_LOAN: {
+        THRESHOLD_WEEKLY: 465, // Repayment threshold
+        RATE: 0.12
+    },
+    BENEFIT_ABATEMENT: {
+        FREE_ZONE: 160,
+        REDUCTION_RATE: 0.70 // 70 cents per dollar
+    }
+};
+
 // --- APP NAMESPACE ---
 const app = {
     state: {
@@ -5,35 +29,62 @@ const app = {
         numberOfWeeks: 1,
         transactions: [],
         viewDate: new Date(),
-        tempCalcResult: 0,
         chartInstance: null,
-        optDataStore: [],
-        openTableRows: []
+        optDataStore: []
     },
 
     init: function() {
-        // Set View Date to current Monday
+        // Initialize View Date to current Monday
         const d = new Date();
         const day = d.getDay(), diff = d.getDate() - day + (day == 0 ? -6:1);
         app.state.viewDate = new Date(d.setDate(diff));
-        document.getElementById('t-date').valueAsDate = new Date();
+        
+        // Initialize Date Input defaults
+        const dateInput = document.getElementById('t-date');
+        if(dateInput) dateInput.valueAsDate = new Date();
 
         this.storage.load();
-        this.calc.setMode('weekly', document.querySelector('.segment-btn'));
+        
+        // Render Initial UI
+        this.calc.setMode('weekly');
         this.tracker.render();
         this.nav.init();
         
-        // Listeners
-        document.getElementById('calc-btn').addEventListener('click', () => app.calc.compute());
-        document.getElementById('hourSlider').addEventListener('input', (e) => app.graph.handleSlider(e.target.value));
+        // --- EVENT LISTENERS ---
         
-        // Sync inputs on change
-        ['hourly', 'base-benefit', 'hpToggle', 'slToggle', 'ksToggle', 'ksPercent'].forEach(id => {
+        // 1. Calculator Inputs & Buttons
+        document.getElementById('calc-btn').addEventListener('click', () => app.calc.compute());
+        
+        const modeButtons = {
+            'mode-weekly': 'weekly',
+            'mode-fortnightly': 'fortnightly',
+            'mode-custom': 'custom'
+        };
+        for (const [id, mode] of Object.entries(modeButtons)) {
+            document.getElementById(id).addEventListener('click', (e) => app.calc.setMode(mode, e.target));
+        }
+
+        // 2. Settings & Sliders (Auto-save & Update Graph)
+        const autoUpdateInputs = ['hourly', 'base-benefit', 'hpToggle', 'slToggle', 'ksToggle', 'ksPercent', 'custom-weeks-count'];
+        autoUpdateInputs.forEach(id => {
             document.getElementById(id).addEventListener('input', () => {
                 app.storage.save();
-                if(document.getElementById('tab-graph').classList.contains('active')) app.graph.update();
+                if(!document.getElementById('tab-graph').classList.contains('hidden')) app.graph.update();
+                if(id === 'custom-weeks-count') app.calc.renderInputs(); // Refresh week rows
             });
         });
+        
+        document.getElementById('themeSelect').addEventListener('change', () => app.storage.save());
+        
+        // 3. Tracker Modals
+        document.getElementById('add-txn-fab').addEventListener('click', () => app.tracker.openModal());
+        document.getElementById('modal-close-btn').addEventListener('click', () => app.tracker.closeModal());
+        document.getElementById('save-btn').addEventListener('click', () => app.tracker.saveTxn());
+        document.getElementById('delete-btn').addEventListener('click', () => app.tracker.deleteTxn());
+        
+        // 4. Graph Interactions
+        document.getElementById('hourSlider').addEventListener('input', (e) => app.graph.handleSlider(e.target.value));
+        document.getElementById('ghostToggle').addEventListener('change', () => app.graph.update());
     },
 
     // --- NAVIGATION ---
@@ -59,19 +110,86 @@ const app = {
             const titles = { calc: 'Calculator', tracker: 'My Wallet', graph: 'Analysis' };
             document.getElementById('page-title').innerText = titles[tabName];
             
-            if(tabName === 'graph') setTimeout(() => app.graph.update(), 100);
-            if(tabName === 'tracker') document.getElementById('tracker-nav').classList.remove('hidden');
-            else document.getElementById('tracker-nav').classList.add('hidden');
+            if(tabName === 'graph') setTimeout(() => app.graph.update(), 50);
+            
+            const trackerNav = document.getElementById('tracker-nav');
+            if(tabName === 'tracker') trackerNav.classList.remove('hidden');
+            else trackerNav.classList.add('hidden');
         }
     },
 
-    // --- CALCULATOR ---
-    calc: {
-        setMode: function(mode, el) {
-            app.state.calcMode = mode;
-            document.querySelectorAll('.segment-btn').forEach(b => b.classList.remove('active'));
-            if(el) el.classList.add('active');
+    // --- TAX ENGINE (The Brain) ---
+    engine: {
+        calculatePaye: function(annualGross) {
+            let tax = 0;
+            let remainingIncome = annualGross;
+            let previousLimit = 0;
+
+            for (const bracket of NZ_CONFIG.TAX_BRACKETS) {
+                if (remainingIncome <= 0) break;
+
+                const taxableInThisBracket = Math.min(remainingIncome, bracket.limit - previousLimit);
+                tax += taxableInThisBracket * bracket.rate;
+                
+                remainingIncome -= taxableInThisBracket;
+                previousLimit = bracket.limit;
+            }
+            return tax; // Annual Tax
+        },
+
+        calculateDeductions: function(weeklyGross, settings) {
+            const annualGross = weeklyGross * 52;
             
+            // 1. PAYE (Annualized then /52)
+            const annualTax = this.calculatePaye(annualGross);
+            const weeklyPaye = annualTax / 52;
+
+            // 2. ACC
+            const liableEarnings = Math.min(annualGross, NZ_CONFIG.ACC.CAP);
+            const weeklyAcc = (liableEarnings * NZ_CONFIG.ACC.RATE) / 52;
+
+            // 3. Student Loan
+            let weeklySl = 0;
+            if (settings.hasLoan && weeklyGross > NZ_CONFIG.STUDENT_LOAN.THRESHOLD_WEEKLY) {
+                weeklySl = (weeklyGross - NZ_CONFIG.STUDENT_LOAN.THRESHOLD_WEEKLY) * NZ_CONFIG.STUDENT_LOAN.RATE;
+            }
+
+            // 4. KiwiSaver
+            const weeklyKs = settings.hasKs ? weeklyGross * settings.ksRate : 0;
+
+            return {
+                paye: weeklyPaye,
+                acc: weeklyAcc,
+                sl: weeklySl,
+                ks: weeklyKs,
+                total: weeklyPaye + weeklyAcc + weeklySl + weeklyKs
+            };
+        },
+
+        calculateAbatement: function(weeklyGross, baseBenefit) {
+            if (weeklyGross <= NZ_CONFIG.BENEFIT_ABATEMENT.FREE_ZONE) return baseBenefit;
+            
+            const reduction = (weeklyGross - NZ_CONFIG.BENEFIT_ABATEMENT.FREE_ZONE) * NZ_CONFIG.BENEFIT_ABATEMENT.REDUCTION_RATE;
+            return Math.max(0, baseBenefit - reduction);
+        }
+    },
+
+    // --- CALCULATOR UI ---
+    calc: {
+        setMode: function(mode, btnElement) {
+            app.state.calcMode = mode;
+            
+            // Update UI Buttons
+            document.querySelectorAll('.segment-btn').forEach(b => {
+                b.classList.remove('active', 'bg-white', 'dark:bg-gray-700', 'shadow-sm');
+                b.classList.add('opacity-60');
+            });
+            if(btnElement) {
+                btnElement.classList.add('active', 'bg-white', 'dark:bg-gray-700', 'shadow-sm');
+                btnElement.classList.remove('opacity-60');
+            }
+
+            // Toggle Custom Input
             const customBox = document.getElementById('custom-weeks-container');
             if (mode === 'custom') customBox.classList.remove('hidden');
             else customBox.classList.add('hidden');
@@ -83,76 +201,115 @@ const app = {
         renderInputs: function() {
             const container = document.getElementById('week-inputs-container');
             container.innerHTML = '';
-            let weeks = app.state.calcMode === 'weekly' ? 1 : app.state.calcMode === 'fortnightly' ? 2 : parseInt(document.getElementById('custom-weeks-count').value) || 4;
+            
+            let weeks = 1;
+            if(app.state.calcMode === 'fortnightly') weeks = 2;
+            if(app.state.calcMode === 'custom') weeks = parseInt(document.getElementById('custom-weeks-count').value) || 1;
+            
             app.state.numberOfWeeks = weeks;
 
             for (let i = 1; i <= weeks; i++) {
-                container.innerHTML += `
-                    <div class="flex items-center gap-2">
-                        <span class="text-xs font-bold w-12 opacity-60 uppercase">Week ${i}</span>
-                        <input type="number" id="h${i}" placeholder="Hours" class="input-field text-center font-bold">
-                    </div>`;
+                const div = document.createElement('div');
+                div.className = "flex items-center gap-2";
+                div.innerHTML = `
+                    <span class="text-xs font-bold w-12 opacity-60 uppercase">Week ${i}</span>
+                    <input type="number" id="h${i}" placeholder="Hours" class="input-field text-center font-bold">
+                `;
+                container.appendChild(div);
             }
         },
 
         compute: function() {
-            const hourly = parseFloat(document.getElementById('hourly').value) || 0;
-            const base = parseFloat(document.getElementById('base-benefit').value) || 401;
-            const hp = document.getElementById('hpToggle').checked;
-            const slOn = document.getElementById('slToggle').checked;
-            const ksOn = document.getElementById('ksToggle').checked;
-            const ksRate = parseFloat(document.getElementById('ksPercent').value);
+            // Gather Settings
+            const hourlyRate = parseFloat(document.getElementById('hourly').value) || 0;
+            const baseBenefit = parseFloat(document.getElementById('base-benefit').value) || 0;
+            const settings = {
+                hasHp: document.getElementById('hpToggle').checked,
+                hasLoan: document.getElementById('slToggle').checked,
+                hasKs: document.getElementById('ksToggle').checked,
+                ksRate: parseFloat(document.getElementById('ksPercent').value)
+            };
 
-            let totalNet = 0, totalBen = 0;
+            let totalNet = 0;
             let weeksData = [];
 
             for (let i = 1; i <= app.state.numberOfWeeks; i++) {
-                const h = parseFloat(document.getElementById(`h${i}`).value) || 0;
-                let gross = hourly * h * (hp ? 1.08 : 1);
+                const hoursInput = document.getElementById(`h${i}`);
+                const hours = parseFloat(hoursInput ? hoursInput.value : 0) || 0;
                 
-                // Tax (Simple Approx for v17)
-                let paye = 0, r = gross * 52;
-                [[15600,0.105],[53500,0.175],[78100,0.30],[180000,0.33],[Infinity,0.39]].forEach(b=>{
-                   let limit=b[0], prev=[[15600,0.105],[53500,0.175],[78100,0.30],[180000,0.33],[Infinity,0.39]].indexOf(b)>0?[[15600,0.105],[53500,0.175],[78100,0.30],[180000,0.33],[Infinity,0.39]][[[15600,0.105],[53500,0.175],[78100,0.30],[180000,0.33],[Infinity,0.39]].indexOf(b)-1][0]:0;
-                   if(r>0){ let t=Math.min(r, limit-prev); paye+=t*b[1]; r-=t; }
-                });
-                paye/=52;
+                // 1. Calculate Gross
+                const gross = hourlyRate * hours * (settings.hasHp ? 1.08 : 1);
                 
-                let acc = Math.min(gross*52, 152790)*0.0167/52;
-                let ks = ksOn ? gross*ksRate : 0;
-                let sl = (slOn && gross > 464) ? (gross-464)*0.12 : 0;
-                let net = gross - paye - acc - ks - sl;
-                let reduction = gross > 160 ? (gross-160)*0.7 : 0;
-                let finalBen = Math.max(0, base - reduction);
+                // 2. Calculate Deductions (Tax, SL, KS)
+                const ded = app.engine.calculateDeductions(gross, settings);
+                const netPay = gross - ded.total;
 
-                totalNet += net; totalBen += finalBen;
-                weeksData.push({i, gross, paye, acc, ks, sl, net, finalBen, reduction, base});
+                // 3. Calculate Benefit
+                const benefit = app.engine.calculateAbatement(gross, baseBenefit);
+                const reduction = baseBenefit - benefit;
+
+                totalNet += (netPay + benefit);
+                weeksData.push({ i, gross, ...ded, netPay, benefit, reduction, baseBenefit });
             }
 
-            const grandTotal = totalNet + totalBen;
-            app.state.tempCalcResult = grandTotal; // For bridge
+            this.renderResults(weeksData, totalNet);
+        },
 
-            // Render Output
+        renderResults: function(weeksData, grandTotal) {
             const container = document.getElementById('results-container');
-            let content = '';
+            
+            // Helper to create HTML for one week detail
+            const createDetailHTML = (w) => `
+                <div class="grid grid-cols-2 gap-2 mt-2">
+                    <div class="p-2 bg-white dark:bg-[#2C2C2E] rounded border border-gray-200 dark:border-gray-700">
+                        <h4 class="text-[10px] font-bold text-blue-500 uppercase mb-1">Work Pay</h4>
+                        <div class="text-[10px] space-y-1">
+                            <div class="flex justify-between"><span>Gross</span><span>$${w.gross.toFixed(2)}</span></div>
+                            <div class="flex justify-between text-red-500"><span>PAYE</span><span>-$${w.paye.toFixed(2)}</span></div>
+                            <div class="flex justify-between text-red-500"><span>ACC</span><span>-$${w.acc.toFixed(2)}</span></div>
+                            ${w.sl > 0 ? `<div class="flex justify-between text-orange-500"><span>Loan</span><span>-$${w.sl.toFixed(2)}</span></div>` : ''}
+                            ${w.ks > 0 ? `<div class="flex justify-between text-orange-500"><span>KS</span><span>-$${w.ks.toFixed(2)}</span></div>` : ''}
+                            <div class="border-t border-gray-300 dark:border-gray-600 pt-1 mt-1 font-bold flex justify-between">
+                                <span>Net</span><span>$${w.netPay.toFixed(2)}</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="p-2 bg-white dark:bg-[#2C2C2E] rounded border border-gray-200 dark:border-gray-700">
+                        <h4 class="text-[10px] font-bold text-purple-500 uppercase mb-1">Benefit</h4>
+                        <div class="text-[10px] space-y-1">
+                            <div class="flex justify-between"><span>Base</span><span>$${w.baseBenefit.toFixed(2)}</span></div>
+                            <div class="flex justify-between text-red-500"><span>Loss</span><span>-$${w.reduction.toFixed(2)}</span></div>
+                            <div class="border-t border-gray-300 dark:border-gray-600 pt-1 mt-1 font-bold flex justify-between">
+                                <span>Final</span><span>$${w.benefit.toFixed(2)}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <button onclick="app.tracker.bank(${(w.netPay + w.benefit).toFixed(2)})" class="w-full mt-2 py-2 text-xs font-bold text-green-600 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
+                    + Add to Tracker ($${(w.netPay + w.benefit).toFixed(2)})
+                </button>
+            `;
 
+            let contentHTML = '';
+            
             if (weeksData.length === 1) {
-                content = app.calc.renderDeepDive(weeksData[0]);
+                contentHTML = createDetailHTML(weeksData[0]);
             } else {
-                content = weeksData.map(w => `
+                weeksData.forEach(w => {
+                    contentHTML += `
                     <details class="group border-b border-gray-200 dark:border-gray-800">
                         <summary class="flex justify-between items-center py-3 px-4 cursor-pointer hover:bg-gray-50 dark:hover:bg-white/5">
                             <span class="font-bold text-sm">Week ${w.i}</span>
                             <div class="flex items-center gap-2">
-                                <span>$${(w.net + w.finalBen).toFixed(2)}</span>
+                                <span>$${(w.netPay + w.benefit).toFixed(2)}</span>
                                 <svg class="chevron w-4 h-4 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
                             </div>
                         </summary>
                         <div class="bg-gray-100 dark:bg-white/5 px-4 pb-3 pt-2">
-                            ${app.calc.renderDeepDive(w)}
+                            ${createDetailHTML(w)}
                         </div>
-                    </details>
-                `).join('');
+                    </details>`;
+                });
             }
 
             container.innerHTML = `
@@ -166,7 +323,7 @@ const app = {
                             <svg class="chevron w-6 h-6 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
                         </summary>
                         <div class="border-t border-gray-100 dark:border-gray-800">
-                            ${content}
+                            ${contentHTML}
                         </div>
                     </details>
                 </div>
@@ -174,39 +331,6 @@ const app = {
             
             document.getElementById('calc-output').classList.remove('hidden');
             document.getElementById('calc-output').scrollIntoView({behavior:'smooth'});
-        },
-
-        renderDeepDive: function(d) {
-            const wTotal = d.net + d.finalBen;
-            return `
-                <div class="grid grid-cols-2 gap-2 mt-2">
-                    <div class="p-2 bg-white dark:bg-[#2C2C2E] rounded border border-gray-200 dark:border-gray-700">
-                        <h4 class="text-[10px] font-bold text-blue-500 uppercase mb-1">Work Pay</h4>
-                        <div class="text-[10px] space-y-1">
-                            <div class="flex justify-between"><span>Gross</span><span>$${d.gross.toFixed(2)}</span></div>
-                            <div class="flex justify-between text-red-500"><span>Tax</span><span>-$${d.paye.toFixed(2)}</span></div>
-                            <div class="flex justify-between text-red-500"><span>ACC</span><span>-$${d.acc.toFixed(2)}</span></div>
-                            <div class="flex justify-between text-orange-500"><span>Loan</span><span>-$${d.sl.toFixed(2)}</span></div>
-                            <div class="border-t border-gray-300 dark:border-gray-600 pt-1 mt-1 font-bold flex justify-between">
-                                <span>Net</span><span>$${d.net.toFixed(2)}</span>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="p-2 bg-white dark:bg-[#2C2C2E] rounded border border-gray-200 dark:border-gray-700">
-                        <h4 class="text-[10px] font-bold text-purple-500 uppercase mb-1">Benefit</h4>
-                        <div class="text-[10px] space-y-1">
-                            <div class="flex justify-between"><span>Base</span><span>$${d.base.toFixed(2)}</span></div>
-                            <div class="flex justify-between text-red-500"><span>Loss</span><span>-$${d.reduction.toFixed(2)}</span></div>
-                            <div class="border-t border-gray-300 dark:border-gray-600 pt-1 mt-1 font-bold flex justify-between">
-                                <span>Final</span><span>$${d.finalBen.toFixed(2)}</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <button onclick="app.tracker.bank(${wTotal})" class="w-full mt-2 py-2 text-xs font-bold text-green-600 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
-                    + Add to Tracker ($${wTotal.toFixed(2)})
-                </button>
-            `;
         }
     },
 
@@ -216,32 +340,31 @@ const app = {
             const container = document.getElementById('tracker-list');
             container.innerHTML = '';
             
-            // Filter by Week
+            // Navigation Label
             const start = new Date(app.state.viewDate);
             const end = new Date(start); end.setDate(end.getDate()+6);
-            
-            // Update Label
             const fmt = d => d.toLocaleDateString('en-NZ', {day:'numeric', month:'short'}).toUpperCase();
+            
             const labelDiv = document.getElementById('tracker-nav');
-            if(!labelDiv.innerHTML) {
-                labelDiv.innerHTML = `
-                    <button onclick="app.tracker.shift(-1)" class="p-2 opacity-60"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg></button>
-                    <div class="text-xs font-bold uppercase" id="week-label"></div>
-                    <button onclick="app.tracker.shift(1)" class="p-2 opacity-60"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg></button>
-                `;
-            }
-            document.getElementById('week-label').innerText = `${fmt(start)} - ${fmt(end)}`;
+            labelDiv.innerHTML = `
+                <div class="flex justify-center items-center gap-4">
+                    <button id="track-prev" class="p-2 opacity-60 hover:opacity-100"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg></button>
+                    <div class="text-xs font-bold uppercase w-32 text-center">${fmt(start)} - ${fmt(end)}</div>
+                    <button id="track-next" class="p-2 opacity-60 hover:opacity-100"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg></button>
+                </div>
+            `;
+            
+            // Add listeners to new buttons
+            document.getElementById('track-prev').addEventListener('click', () => app.tracker.shift(-1));
+            document.getElementById('track-next').addEventListener('click', () => app.tracker.shift(1));
 
-            // Filter Txns
+            // Filter
             const weekTxns = app.state.transactions.filter(t => {
                 const d = new Date(t.date);
                 return d >= start && d <= end;
             }).sort((a,b) => new Date(b.date) - new Date(a.date));
 
-            // Calc Totals
-            let income=0, expense=0;
-            // Pre-calculate opening balance? Complex. Let's just sum current view for simplicity as requested "Current Balance"
-            // Actually, "Current Balance" implies total money ever.
+            // Balance
             let totalBalance = app.state.transactions.reduce((acc, t) => acc + (t.type==='income'?t.amount:-t.amount), 0);
             document.getElementById('wallet-balance').innerText = `$${totalBalance.toFixed(2)}`;
 
@@ -251,26 +374,27 @@ const app = {
             }
 
             weekTxns.forEach(t => {
-                const date = new Date(t.date).toLocaleDateString('en-NZ', {day:'2-digit', month:'2-digit'});
-                container.innerHTML += `
-                    <div class="ios-card relative">
-                        <div class="p-3 flex justify-between items-center cursor-pointer" onclick="this.nextElementSibling.classList.toggle('hidden')">
-                            <div class="flex items-center gap-3">
-                                <span class="text-xs font-mono opacity-50">[${date}]</span>
-                                <span class="font-medium text-sm">${t.label}</span>
-                            </div>
-                            <div class="flex items-center gap-2">
-                                <span class="font-bold text-sm ${t.type==='income'?'text-green-500':''}">${t.type==='income'?'+':'-'}$${t.amount.toFixed(2)}</span>
-                                <button onclick="app.tracker.editModal(${t.id}); event.stopPropagation();" class="opacity-30 hover:opacity-100 px-2">⋮</button>
-                            </div>
+                const dateStr = new Date(t.date).toLocaleDateString('en-NZ', {day:'2-digit', month:'2-digit'});
+                const div = document.createElement('div');
+                div.className = "ios-card relative group";
+                div.innerHTML = `
+                    <div class="p-3 flex justify-between items-center cursor-pointer txn-trigger">
+                        <div class="flex items-center gap-3">
+                            <span class="text-xs font-mono opacity-50">[${dateStr}]</span>
+                            <span class="font-medium text-sm">${t.label}</span>
                         </div>
-                        <!-- Details -->
-                        <div class="hidden bg-gray-50 dark:bg-white/5 p-2 text-xs border-t border-gray-100 dark:border-gray-800">
-                            <div class="flex justify-between"><span>Type:</span><span class="capitalize">${t.type}</span></div>
-                            <div class="flex justify-between"><span>ID:</span><span>${t.id}</span></div>
+                        <div class="flex items-center gap-2">
+                            <span class="font-bold text-sm ${t.type==='income'?'text-green-500':''}">${t.type==='income'?'+':'-'}$${t.amount.toFixed(2)}</span>
+                            <button class="edit-btn opacity-30 hover:opacity-100 px-2">⚙️</button>
                         </div>
                     </div>
                 `;
+                // Add Edit Listener
+                div.querySelector('.edit-btn').addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    app.tracker.editModal(t.id);
+                });
+                container.appendChild(div);
             });
         },
 
@@ -280,20 +404,26 @@ const app = {
         },
 
         openModal: function() {
-            document.getElementById('addModal').classList.add('open');
+            const modal = document.getElementById('addModal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+            
             document.getElementById('modal-title').innerText = "Add Transaction";
             document.getElementById('t-id').value = "";
             document.getElementById('t-amount').value = "";
             document.getElementById('t-label').value = "";
             document.getElementById('t-date').valueAsDate = new Date();
+            
             document.getElementById('delete-btn').classList.add('hidden');
-            document.getElementById('save-btn').classList.remove('col-span-1');
-            document.getElementById('save-btn').classList.add('col-span-2');
+            const saveBtn = document.getElementById('save-btn');
+            saveBtn.classList.remove('col-span-1');
+            saveBtn.classList.add('col-span-2');
         },
 
         editModal: function(id) {
-            const t = app.state.transactions.find(x => x.id === id);
+            const t = app.state.transactions.find(x => x.id === parseInt(id));
             if(!t) return;
+            
             this.openModal();
             document.getElementById('modal-title').innerText = "Edit Transaction";
             document.getElementById('t-id').value = t.id;
@@ -301,12 +431,18 @@ const app = {
             document.getElementById('t-type').value = t.type;
             document.getElementById('t-date').value = t.date;
             document.getElementById('t-label').value = t.label;
+            
             document.getElementById('delete-btn').classList.remove('hidden');
-            document.getElementById('save-btn').classList.remove('col-span-2');
-            document.getElementById('save-btn').classList.add('col-span-1');
+            const saveBtn = document.getElementById('save-btn');
+            saveBtn.classList.remove('col-span-2');
+            saveBtn.classList.add('col-span-1');
         },
 
-        closeModal: function() { document.getElementById('addModal').classList.remove('open'); },
+        closeModal: function() { 
+            const modal = document.getElementById('addModal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        },
 
         saveTxn: function() {
             const id = document.getElementById('t-id').value;
@@ -336,9 +472,9 @@ const app = {
             this.render();
         },
 
-        bank: function(amount) {
+        bank: function(amountStr) {
             this.openModal();
-            document.getElementById('t-amount').value = amount.toFixed(2);
+            document.getElementById('t-amount').value = amountStr;
             document.getElementById('t-type').value = 'income';
             document.getElementById('t-label').value = 'Weekly Pay';
         }
@@ -347,62 +483,69 @@ const app = {
     // --- GRAPH ---
     graph: {
         update: function() {
-            const hourly = parseFloat(document.getElementById('hourly').value) || 0;
-            const base = parseFloat(document.getElementById('base-benefit').value) || 401;
-            if (hourly === 0) return;
+            const hourlyRate = parseFloat(document.getElementById('hourly').value) || 0;
+            const baseBenefit = parseFloat(document.getElementById('base-benefit').value) || 0;
+            if (hourlyRate === 0) return;
 
-            // Re-calc 50 hours
-            let labels = [], dataMoney = [], dataPoints = [];
-            let sweetEnd = 0, deadEnd = 0;
-            const hp = document.getElementById('hpToggle').checked;
-            
-            app.state.optDataStore = []; // Reset
+            const settings = {
+                hasHp: document.getElementById('hpToggle').checked,
+                hasLoan: document.getElementById('slToggle').checked,
+                hasKs: document.getElementById('ksToggle').checked,
+                ksRate: parseFloat(document.getElementById('ksPercent').value)
+            };
 
+            let labels = [], dataMoney = [], sweetEnd = 0, deadEnd = 0;
+            app.state.optDataStore = [];
+
+            // Calculate 0 to 50 hours efficiently
             for(let h=0; h<=50; h++) {
-                // Logic copy from calc (simplified for visual)
-                let gross = hourly*h*(hp?1.08:1);
-                let reduction = gross>160?(gross-160)*0.7:0;
-                let ben = Math.max(0, base-reduction);
-                // Tax Approx
-                let tax = (gross*0.18); // General avg tax+acc+ks for speed in graph
-                let net = gross - tax;
-                let total = net + ben;
+                const gross = hourlyRate * h * (settings.hasHp ? 1.08 : 1);
+                
+                // Use the Engine!
+                const ded = app.engine.calculateDeductions(gross, settings);
+                const netPay = gross - ded.total;
+                const benefit = app.engine.calculateAbatement(gross, baseBenefit);
+                
+                const total = netPay + benefit;
                 
                 labels.push(h);
                 dataMoney.push(total);
                 
                 let zone = 'breakout';
-                if(gross <= 160) { zone = 'sweet'; sweetEnd=h; }
-                else if(ben > 0) { zone = 'dead'; deadEnd=h; }
+                if(gross <= NZ_CONFIG.BENEFIT_ABATEMENT.FREE_ZONE) { zone = 'sweet'; sweetEnd = h; }
+                else if(benefit > 0) { zone = 'dead'; deadEnd = h; }
                 
-                // Marginal
-                let prev = h===0?0:app.state.optDataStore[h-1].total;
+                // Logic for "Symbols" (Quick visual indicators)
+                let prev = h===0 ? 0 : app.state.optDataStore[h-1].total;
                 let marg = total - prev;
                 let sym = '';
-                if(zone==='sweet' && (gross+hourly)>160) sym='🟢';
-                if(zone==='dead' && marg<2) sym='🛑';
-                if(zone==='breakout' && ben===0 && app.state.optDataStore[h-1].b>0) sym='🏁';
+                // Sweet Spot Limit
+                if(zone==='sweet' && (gross + hourlyRate) > NZ_CONFIG.BENEFIT_ABATEMENT.FREE_ZONE) sym='⚠️'; 
+                // Stagnation (earning less than $2/hr effective)
+                if(zone==='dead' && marg < 2 && h > 0) sym='🛑'; 
+                // Freedom
+                if(zone==='breakout' && benefit === 0 && app.state.optDataStore[h-1].benefit > 0) sym='🏁';
 
-                app.state.optDataStore.push({h, total, marg, zone, sym, work:net, b:ben});
+                app.state.optDataStore.push({h, total, marg, zone, sym, work: netPay, benefit});
             }
 
             // Draw Chart
             const ctx = document.getElementById('optChart').getContext('2d');
             if(app.state.chartInstance) app.state.chartInstance.destroy();
             
-            const grad = ctx.createLinearGradient(0,0,0,300);
-            grad.addColorStop(0, 'rgba(0,122,255,0.4)');
-            grad.addColorStop(1, 'rgba(0,122,255,0.05)');
+            const gradient = ctx.createLinearGradient(0,0,0,300);
+            gradient.addColorStop(0, 'rgba(0,122,255,0.4)');
+            gradient.addColorStop(1, 'rgba(0,122,255,0.05)');
 
             app.state.chartInstance = new Chart(ctx, {
                 type: 'line',
                 data: {
                     labels: labels,
                     datasets: [{
-                        label: 'Total',
+                        label: 'Total Income',
                         data: dataMoney,
                         borderColor: '#007AFF',
-                        backgroundColor: grad,
+                        backgroundColor: gradient,
                         fill: true,
                         pointRadius: 0,
                         tension: 0.3
@@ -455,7 +598,7 @@ const app = {
                     </div>
                     <div class="flex justify-between text-sm">
                         <span>Work: $${d.work.toFixed(0)}</span>
-                        <span>Ben: $${d.b.toFixed(0)}</span>
+                        <span>Ben: $${d.benefit.toFixed(0)}</span>
                     </div>
                     <div class="mt-2 pt-2 border-t border-gray-100 dark:border-gray-700 font-black text-2xl text-center">
                         $${d.total.toFixed(2)}
@@ -470,8 +613,10 @@ const app = {
             app.state.optDataStore.forEach(d => {
                 if(d.h===0) return;
                 let bg = d.zone==='sweet'?'bg-green-50/50 dark:bg-green-900/20':d.zone==='dead'?'bg-red-50/50 dark:bg-red-900/20':'';
-                t.innerHTML += `
-                    <div class="opt-row ${bg}" onclick="this.nextElementSibling.classList.toggle('open')">
+                
+                const row = document.createElement('div');
+                row.innerHTML = `
+                    <div class="opt-row ${bg}">
                         <div>${d.h}</div>
                         <div class="text-center">${d.sym}</div>
                         <div class="text-right">$${d.total.toFixed(0)}</div>
@@ -480,9 +625,15 @@ const app = {
                     </div>
                     <div class="opt-detail">
                         <div class="flex justify-between text-xs"><span>Work Net</span><span>$${d.work.toFixed(2)}</span></div>
-                        <div class="flex justify-between text-xs"><span>Benefit</span><span>$${d.b.toFixed(2)}</span></div>
+                        <div class="flex justify-between text-xs"><span>Benefit</span><span>$${d.benefit.toFixed(2)}</span></div>
                     </div>
                 `;
+                // Add click listener to the row to toggle details
+                row.querySelector('.opt-row').addEventListener('click', function() {
+                    this.nextElementSibling.classList.toggle('open');
+                });
+                
+                t.appendChild(row);
             });
         }
     },
@@ -525,4 +676,5 @@ const app = {
     }
 };
 
+// Start App
 app.init();
