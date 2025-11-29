@@ -1,28 +1,6 @@
-// --- CONSTANTS (Configuration) ---
-// Update these values when NZ Government legislation changes
-const NZ_CONFIG = {
-    TAX_BRACKETS: [
-        { limit: 15600, rate: 0.105 },
-        { limit: 53500, rate: 0.175 },
-        { limit: 78100, rate: 0.30 },
-        { limit: 180000, rate: 0.33 },
-        { limit: Infinity, rate: 0.39 }
-    ],
-    ACC: {
-        RATE: 0.016, // 1.6% (Approximate for 2024/25)
-        CAP: 142283 // Max earnings liable for ACC
-    },
-    STUDENT_LOAN: {
-        THRESHOLD_WEEKLY: 465, // Repayment threshold
-        RATE: 0.12
-    },
-    BENEFIT_ABATEMENT: {
-        FREE_ZONE: 160,
-        REDUCTION_RATE: 0.70 // 70 cents per dollar
-    }
-};
+import { NZ_CONFIG } from './config.js';
+import { calculatePaye, calculateDeductions, calculateAbatement } from './calculator.js';
 
-// --- APP NAMESPACE ---
 const app = {
     state: {
         calcMode: 'weekly',
@@ -118,61 +96,6 @@ const app = {
         }
     },
 
-    // --- TAX ENGINE (The Brain) ---
-    engine: {
-        calculatePaye: function(annualGross) {
-            let tax = 0;
-            let remainingIncome = annualGross;
-            let previousLimit = 0;
-
-            for (const bracket of NZ_CONFIG.TAX_BRACKETS) {
-                if (remainingIncome <= 0) break;
-
-                const taxableInThisBracket = Math.min(remainingIncome, bracket.limit - previousLimit);
-                tax += taxableInThisBracket * bracket.rate;
-                
-                remainingIncome -= taxableInThisBracket;
-                previousLimit = bracket.limit;
-            }
-            return tax; // Annual Tax
-        },
-
-        calculateDeductions: function(weeklyGross, settings) {
-            const annualGross = weeklyGross * 52;
-            
-            // 1. PAYE (Annualized then /52)
-            const annualTax = this.calculatePaye(annualGross);
-            const weeklyPaye = annualTax / 52;
-
-            // 2. ACC
-            const liableEarnings = Math.min(annualGross, NZ_CONFIG.ACC.CAP);
-            const weeklyAcc = (liableEarnings * NZ_CONFIG.ACC.RATE) / 52;
-
-            // 3. Student Loan
-            let weeklySl = 0;
-            if (settings.hasLoan && weeklyGross > NZ_CONFIG.STUDENT_LOAN.THRESHOLD_WEEKLY) {
-                weeklySl = (weeklyGross - NZ_CONFIG.STUDENT_LOAN.THRESHOLD_WEEKLY) * NZ_CONFIG.STUDENT_LOAN.RATE;
-            }
-
-            // 4. KiwiSaver
-            const weeklyKs = settings.hasKs ? weeklyGross * settings.ksRate : 0;
-
-            return {
-                paye: weeklyPaye,
-                acc: weeklyAcc,
-                sl: weeklySl,
-                ks: weeklyKs,
-                total: weeklyPaye + weeklyAcc + weeklySl + weeklyKs
-            };
-        },
-
-        calculateAbatement: function(weeklyGross, baseBenefit) {
-            if (weeklyGross <= NZ_CONFIG.BENEFIT_ABATEMENT.FREE_ZONE) return baseBenefit;
-            
-            const reduction = (weeklyGross - NZ_CONFIG.BENEFIT_ABATEMENT.FREE_ZONE) * NZ_CONFIG.BENEFIT_ABATEMENT.REDUCTION_RATE;
-            return Math.max(0, baseBenefit - reduction);
-        }
-    },
 
     // --- CALCULATOR UI ---
     calc: {
@@ -240,12 +163,10 @@ const app = {
                 // 1. Calculate Gross
                 const gross = hourlyRate * hours * (settings.hasHp ? 1.08 : 1);
                 
-                // 2. Calculate Deductions (Tax, SL, KS)
-                const ded = app.engine.calculateDeductions(gross, settings);
+                const ded = calculateDeductions(gross, settings);
                 const netPay = gross - ded.total;
 
-                // 3. Calculate Benefit
-                const benefit = app.engine.calculateAbatement(gross, baseBenefit);
+                const benefit = calculateAbatement(gross, baseBenefit);
                 const reduction = baseBenefit - benefit;
 
                 totalNet += (netPay + benefit);
@@ -497,14 +418,12 @@ const app = {
             let labels = [], dataMoney = [], sweetEnd = 0, deadEnd = 0;
             app.state.optDataStore = [];
 
-            // Calculate 0 to 50 hours efficiently
             for(let h=0; h<=50; h++) {
                 const gross = hourlyRate * h * (settings.hasHp ? 1.08 : 1);
-                
-                // Use the Engine!
-                const ded = app.engine.calculateDeductions(gross, settings);
+
+                const ded = calculateDeductions(gross, settings);
                 const netPay = gross - ded.total;
-                const benefit = app.engine.calculateAbatement(gross, baseBenefit);
+                const benefit = calculateAbatement(gross, baseBenefit);
                 
                 const total = netPay + benefit;
                 
